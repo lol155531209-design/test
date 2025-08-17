@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<title>高校-企业合作地图展示</title>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<style>
+    :root{
+      --bg:#0b1220; --panel:#111726; --card:#151d2f; --text:#e7eefc; --muted:#9fb2d9; --brand:#49d1ff;
+      --border:#23304a; --accent:#79ffe1;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+    .wrap{display:grid;grid-template-columns:1fr 0;grid-template-areas:"map panel";height:100%}
+    #map{grid-area:map}
+    #map,#echarts{height:100%}
+    .topbar{
+      position:absolute;left:16px;top:16px;z-index:10;background:rgba(17,23,38,.7);backdrop-filter:blur(6px);
+      border:1px solid var(--border);border-radius:14px;padding:10px 12px;box-shadow:0 10px 30px rgba(0,0,0,.25)
+    }
+    .topbar h1{margin:0;font-size:16px}
+    .hint{margin:6px 0 0;color:var(--muted);font-size:12px}
+    /* side panel */
+    .panel{
+      grid-area:panel;width:420px;max-width:90vw;height:100%;background:var(--panel);border-left:1px solid var(--border);
+      position:fixed;right:0;top:0;transform:translateX(100%);transition:transform .28s ease;z-index:20;
+      display:flex;flex-direction:column
+    }
+    .panel.open{transform:translateX(0)}
+    .panel header{display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--border)}
+    .panel header .title{font-weight:700}
+    .panel header .crumb{color:var(--muted)}
+    .panel .content{padding:12px 16px;overflow:auto;flex:1}
+    .panel .search{position:sticky;top:0;background:var(--panel);padding-bottom:8px}
+    .panel input{
+      width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#0f1523;color:var(--text)
+    }
+    .uni-list{display:grid;grid-template-columns:1fr;gap:10px;margin-top:10px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px}
+    .card h3{margin:0 0 6px;font-size:15px}
+    .meta{color:var(--muted);font-size:12px}
+    .btns{display:flex;gap:8px;margin-top:10px}
+    .btn{
+      padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:#0e1626;color:var(--text);
+      cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px
+    }
+    .btn.primary{border-color:#2a3c63;background:#14223b;box-shadow:0 6px 20px rgba(73,209,255,.15)}
+    .btn:hover{border-color:#3a5287}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-size:12px;color:var(--muted)}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 12px}
+    .tab{padding:6px 10px;border-radius:10px;border:1px solid var(--border);cursor:pointer;color:var(--muted)}
+    .tab.active{color:#001;background:var(--accent);border-color:transparent;font-weight:700}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{border-bottom:1px dashed var(--border);padding:8px 6px;vertical-align:top}
+    th{color:#aaccff;text-align:left}
+    .footer{padding:10px 12px;color:var(--muted);border-top:1px solid var(--border);font-size:12px}
+    .legend{
+      position:absolute;right:16px;top:16px;z-index:10;background:rgba(255,255,255,.06);
+      border:1px solid var(--border);border-radius:12px;padding:10px 12px
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+<div id="map"></div>
+</div>
+<div class="topbar">
+<h1>高校 × 企业 合作地图</h1>
+<div class="hint">悬停看省份高校；点击省份进入详情；点击高校看三类表格并下载 Excel。</div>
+</div>
+<!-- 右侧信息面板 -->
+<aside aria-hidden="true" class="panel" id="panel">
+<header>
+<button class="btn" id="backBtn" style="display:none">← 返回</button>
+<div class="crumb" id="crumb"></div>
+<div class="title" id="panelTitle"></div>
+</header>
+<div class="content" id="panelContent"></div>
+<div class="footer">可在 <span class="pill">data</span> 里增删高校与表格；Excel放到 <span class="pill">./excels/</span> 目录即可自动链接。</div>
+</aside>
+<!-- ECharts -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+    /** --------------------------
+     *  数据区（示例，可自行增删改）
+     *  每所高校一个 Excel（3 个工作表：合作企业/优势学科/学校专家）
+     * ------------------------- */
+  const data = {
+  "山东省": {
+    universities: [
+      {
+        id: "UPC",
+        name: "中国石油大学（华东）",
+        website: "https://www.upc.edu.cn/",
+        excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+        enterprises: [
+          { 企业: "诸城市茶叶协会", 合作方向: "白垩纪火山活动与恐龙灭绝研究", 项目阶段: "基地建设", 联系人: "见合作清单" },
+          { 企业: "桃林镇人民政府", 合作方向: "地质研究合作", 项目阶段: "基地建设", 联系人: "见合作清单" },
+          { 企业: "山东贝特尔环保科技", 合作方向: "污水净化设备研发", 项目阶段: "技术合作", 联系人: "见合作清单" }
+        ],
+        disciplines: [
+          { 学科: "石油与天然气工程", 学科级别: "双一流学科", 优势说明: "国家级重点学科" },
+          { 学科: "地质资源与地质工程", 学科级别: "双一流学科", 优势说明: "国际领先水平" },
+          { 学科: "化学工程与工艺", 学科级别: "国家级特色专业", 优势说明: "ESI全球前1‰" }
+        ],
+        experts: [] // 需补充专家数据
+      },
+      {
+        id: "OUC",
+        name: "中国海洋大学",
+        website: "https://www.ouc.edu.cn/",
+        excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+        enterprises: [
+          { 企业: "山东永辉乡间生态旅游", 合作方向: "研究生联合培养", 项目阶段: "基地运营", 联系人: "见合作清单" },
+          { 企业: "山东中科贝特环保装备", 合作方向: "污泥资源化利用", 项目阶段: "技术转化", 联系人: "见合作清单" }
+        ],
+        disciplines: [
+          { 学科: "海洋科学", 学科级别: "A+学科", 优势说明: "全国排名第一" },
+          { 学科: "水产养殖", 学科级别: "国家级特色专业", 优势说明: "国家重点实验室支撑" }
+        ],
+        experts: []
+      },
+      {
+        id: "QUST",
+        name: "青岛科技大学",
+        website: "https://www.qust.edu.cn/",
+        excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+        enterprises: [
+          { 企业: "山东海普欧环保设备", 合作方向: "数字一体化污水处理", 项目阶段: "技术合作", 联系人: "见合作清单" },
+          { 企业: "山东佳博耀集食品", 合作方向: "预制菜保鲜技术", 项目阶段: "技术合作", 联系人: "见合作清单" },
+          { 企业: "山东大业股份", 合作方向: "橡胶骨架产品研发", 项目阶段: "技术合作", 联系人: "见合作清单" }
+        ],
+        disciplines: [
+          { 学科: "高分子材料与工程", 学科级别: "国家级特色专业", 优势说明: "国际认证" },
+          { 学科: "化学工程与工艺", 学科级别: "国家级特色专业", 优势说明: "行业领先" }
+        ],
+        experts: []
+      },
+      {
+        id: "SDAU",
+        name: "青岛农业大学",
+        website: "https://www.qau.edu.cn/",
+        excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+        enterprises: [
+          { 企业: "山东信得科技", 合作方向: "动植物医药研发", 项目阶段: "研究院共建", 联系人: "鹿洪伟" },
+          { 企业: "山东颖青茶业", 合作方向: "茶叶栽培技术", 项目阶段: "研究所运营", 联系人: "见合作清单" },
+          { 企业: "山东恒基农牧机械", 合作方向: "固废处理装备", 项目阶段: "技术合作", 联系人: "郭小龙" }
+        ],
+        disciplines: [
+          { 学科: "植物保护", 学科级别: "国家级特色专业", 优势说明: "国家级一流专业" },
+          { 学科: "食品科学与工程", 学科级别: "国家级特色专业", 优势说明: "产业转化能力强" }
+        ],
+        experts: []
+      },
+      {
+        id: "SDUST",
+        name: "山东科技大学",
+        website: "https://www.sdust.edu.cn/",
+        excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+        enterprises: [
+          { 企业: "山东奥氢动力科技", 合作方向: "水电解制氢设备", 项目阶段: "技术合作", 联系人: "鞠修龙" }
+        ],
+        disciplines: [
+          { 学科: "采矿工程", 学科级别: "国家级特色专业", 优势说明: "传统优势学科" },
+          { 学科: "安全工程", 学科级别: "国家级特色专业", 优势说明: "国家重点实验室支撑" }
+        ],
+        experts: []
+      },
+      {
+        id: "QUT",
+        name: "青岛理工大学",
+        website: "https://www.qut.edu.cn/",
+        excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+        enterprises: [
+          { 企业: "山东中航泰达复合材料", 合作方向: "复合材料构件成型", 项目阶段: "技术合作", 联系人: "王旭涛" }
+        ],
+        disciplines: [
+          { 学科: "土木工程", 学科级别: "国家级特色专业", 优势说明: "省级重点学科" },
+          { 学科: "建筑学", 学科级别: "国家级一流专业", 优势说明: "行业认可度高" }
+        ],
+        experts: []
+      },
+      {
+        id: "QLU",
+        name: "齐鲁工业大学",
+        website: "https://www.qlu.edu.cn/",
+        excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+        enterprises: [
+          { 企业: "东晓生物科技", 合作方向: "氨基酸合成技术", 项目阶段: "研究院共建", 联系人: "王建彬" }
+        ],
+        disciplines: [
+          { 学科: "生物工程", 学科级别: "省级重点专业", 优势说明: "产业转化能力强" },
+          { 学科: "食品科学与工程", 学科级别: "省级特色专业", 优势说明: "校企合作紧密" }
+        ],
+        experts: []
+      },
+      {
+        id: "SDAU",
+        name: "山东农业大学",
+        website: "https://www.sdau.edu.cn/",
+        excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+        enterprises: [
+          { 企业: "山东信得科技", 合作方向: "基因工程疫苗", 项目阶段: "技术合作", 联系人: "鹿洪伟" },
+          { 企业: "迈赫机器人自动化", 合作方向: "视觉识别装备", 项目阶段: "技术合作", 联系人: "孙晓艳" },
+          { 企业: "山东得利斯食品", 合作方向: "肉制品加工技术", 项目阶段: "技术合作", 联系人: "李敏" }
+        ],
+        disciplines: [
+          { 学科: "农学", 学科级别: "国家级特色专业", 优势说明: "传统优势学科" },
+          { 学科: "动物医学", 学科级别: "国家级特色专业", 优势说明: "国家重点实验室支撑" }
+        ],
+        experts: []
+      }
+    ]
+  },
+      "浙江省": {
+        universities: [
+          {
+            id: "HDU",
+            name: "杭州电子科技大学",
+            website: "https://www.hdu.edu.cn/",
+            excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+            enterprises: [
+              { 企业: "海康威视", 合作方向: "计算机视觉/嵌入式AI", 项目阶段: "联合实验室", 联系人: "张**" },
+              { 企业: "阿里云", 合作方向: "云原生/大数据/AI平台", 项目阶段: "联合课题（省部级）", 联系人: "李**" },
+              { 企业: "大华股份", 合作方向: "智能感知/边缘计算", 项目阶段: "在研", 联系人: "王**" }
+            ],
+            disciplines: [
+              { 学科: "信息与通信工程", 学科级别: "国家一级", 优势说明: "通信与信息系统、信号与信息处理" },
+              { 学科: "计算机科学与技术", 学科级别: "省重点", 优势说明: "人工智能、软件工程、网安" },
+              { 学科: "控制科学与工程", 学科级别: "省重点", 优势说明: "工业控制、机器人" }
+            ],
+            experts: [
+              { 姓名: "陈某某", 职称: "教授/博导", 研究方向: "机器视觉、目标检测", 联系方式: "chen@example.edu.cn" },
+              { 姓名: "李某某", 职称: "教授", 研究方向: "通信编码、5G/6G", 联系方式: "li@example.edu.cn" },
+              { 姓名: "周某", 职称: "副教授", 研究方向: "工业控制与系统", 联系方式: "zhou@example.edu.cn" }
+            ]
+          },
+          {
+            id: "ZJU",
+            name: "浙江大学",
+            website: "https://www.zju.edu.cn/",
+            excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+            enterprises: [
+              { 企业: "阿里巴巴", 合作方向: "多模态大模型/推荐系统", 项目阶段: "企业捐赠+联合研究院", 联系人: "合作办" },
+              { 企业: "之江实验室", 合作方向: "智能计算/网络空间安全", 项目阶段: "联合攻关", 联系人: "项目秘书" },
+              { 企业: "吉利汽车", 合作方向: "智能驾驶/车路协同", 项目阶段: "产业化试点", 联系人: "对接人" }
+            ],
+            disciplines: [
+              { 学科: "计算机科学与技术", 学科级别: "一流学科A+", 优势说明: "AI、系统软件、图形学" },
+              { 学科: "信息与电子工程", 学科级别: "一流学科A", 优势说明: "微电子、通信、信号处理" },
+              { 学科: "生物医学工程", 学科级别: "一流学科A", 优势说明: "医学成像、精准医疗" }
+            ],
+            experts: [
+              { 姓名: "王某某", 职称: "院士", 研究方向: "人工智能与大数据", 联系方式: "contact@zju.edu.cn" },
+              { 姓名: "赵某某", 职称: "教授", 研究方向: "芯片与系统", 联系方式: "chip@zju.edu.cn" },
+              { 姓名: "孙某", 职称: "研究员", 研究方向: "自动驾驶", 联系方式: "auto@zju.edu.cn" }
+            ]
+          }
+        ]
+      },
+"北京市": {
+  universities: [
+    {
+      id: "BUAA",
+      name: "北京航空航天大学",
+      website: "https://www.buaa.edu.cn/",
+      excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+      enterprises: [
+        { 
+          企业: "诸城航大新材料技术有限公司", 
+          合作方向: "高性能轻量化材料技术联合研究中心", 
+          项目阶段: "招才引智", 
+          联系人: "张虎" 
+        }
+      ],
+      disciplines: [],
+      experts: []
+    },
+    {
+      id: "USTB",
+      name: "北京科技大学",
+      website: "https://www.ustb.edu.cn/",
+      excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+      enterprises: [
+        { 
+          企业: "山东首新种业科技有限公司", 
+          合作方向: "山东诸城耐密高产玉米科技小院", 
+          项目阶段: "招才引智", 
+          联系人: "吴锁伟" 
+        },
+        { 
+          企业: "迈赫机器人自动化股份有限公司", 
+          合作方向: "非结构环境下复合人形机器人作业关键技术及应用", 
+          项目阶段: "科技创新合作", 
+          联系人: "张建华教授" 
+        }
+      ],
+      disciplines: [],
+      experts: []
+    },
+    {
+      id: "CAU",
+      name: "中国农业大学",
+      website: "https://www.cau.edu.cn/",
+      excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+      enterprises: [
+        { 
+          企业: "诸城市中裕机电设备有限公司", 
+          合作方向: "蛋鸡福利化智能养殖技术与装备技术研发", 
+          项目阶段: "技术合作", 
+          联系人: "郑炜超" 
+        },
+        { 
+          企业: "华宝食品股份有限公司", 
+          合作方向: "生产管理智能化和企业发展咨询服务", 
+          项目阶段: "技术合作", 
+          联系人: "王文信" 
+        }
+      ],
+      disciplines: [],
+      experts: []
+    },
+    {
+      id: "BUCT",
+      name: "北京化工大学",
+      website: "https://www.buct.edu.cn/",
+      excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+      enterprises: [
+        { 
+          企业: "山东中航泰达复合材料有限公司", 
+          合作方向: "高性能聚合物超细纤维增韧碳纤维复合材料制品性能的研究", 
+          项目阶段: "科技创新合作", 
+          联系人: "刘勇" 
+        }
+      ],
+      disciplines: [],
+      experts: []
+    },
+    {
+      id: "BTBU",
+      name: "北京工商大学",
+      website: "https://www.btbu.edu.cn/",
+      excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+      enterprises: [
+        { 
+          企业: "得利斯集团有限公司", 
+          合作方向: "西式发酵香肠高活性发酵剂制备及其应用", 
+          项目阶段: "科技创新合作", 
+          联系人: "Kalekristos YohannesWoldemariam" 
+        }
+      ],
+      disciplines: [],
+      experts: []
+    },
+    {
+      id: "BUCEA",
+      name: "北京建筑大学",
+      website: "https://www.bucea.edu.cn/",
+      excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+      enterprises: [
+        { 
+          企业: "山东建华阀门制造有限公司", 
+          合作方向: "智能阀门、高端管阀产品的研发", 
+          项目阶段: "科技创新合作", 
+          联系人: "王文海" 
+        }
+      ],
+      disciplines: [],
+      experts: []
+    },
+    {
+      id: "CAAS",
+      name: "中国农业科学院农产品加工研究所",
+      website: "http://ifst.caas.cn/",
+      excel: "excels/AA-与高校已合作人才项目统计表（持续更新）20241210.xlsx",
+      enterprises: [
+        { 
+          企业: "得利斯集团", 
+          合作方向: "传统肉类菜肴制品工业化加工关键技术及产业化", 
+          项目阶段: "招才引智", 
+          联系人: "张德权" 
+        },
+        { 
+          企业: "得利斯集团", 
+          合作方向: "团体标准《鸡肉类预制菜加工技术规范》", 
+          项目阶段: "招才引智", 
+          联系人: "张德权" 
+        },
+        { 
+          企业: "得利斯集团", 
+          合作方向: "团体标准《肉类预制菜冷链物流仓储运输准则》", 
+          项目阶段: "招才引智", 
+          联系人: "张德权" 
+        },
+        { 
+          企业: "得利斯集团", 
+          合作方向: "专利《一种预制菜肴加工用切块装置》", 
+          项目阶段: "招才引智", 
+          联系人: "张德权" 
+        },
+        { 
+          企业: "得利斯集团", 
+          合作方向: "专利《一种预制菜肴贴体包装机》", 
+          项目阶段: "招才引智", 
+          联系人: "张德权" 
+        },
+        { 
+          企业: "金锣，得利斯集团", 
+          合作方向: "肉制品智能加工与品质控制关键技术与应用", 
+          项目阶段: "招才引智", 
+          联系人: "张德权" 
+        }
+      ],
+      disciplines: [],
+      experts: []
+    }
+  ]
+}
+};
+
+    /** ------------ 工具函数 -------------- */
+    const $ = (sel)=>document.querySelector(sel);
+    const $$ = (sel)=>Array.from(document.querySelectorAll(sel));
+    function createEl(tag, attrs={}, children=[]){
+      const el = document.createElement(tag);
+      Object.entries(attrs).forEach(([k,v])=>{
+        if(k==='class') el.className=v;
+        else if(k==='html') el.innerHTML=v;
+        else el.setAttribute(k,v);
+      });
+      children.forEach(c=>el.appendChild(c));
+      return el;
+    }
+    function renderTable(objArray){
+      if(!objArray || !objArray.length) return createEl('div',{class:'meta',html:'暂无数据'});
+      const cols = Object.keys(objArray[0]);
+      const table = createEl('table');
+      const thead = createEl('thead');
+      const trh = createEl('tr');
+      cols.forEach(c=>trh.appendChild(createEl('th',{html:c})));
+      thead.appendChild(trh); table.appendChild(thead);
+      const tbody = createEl('tbody');
+      objArray.forEach(row=>{
+        const tr = createEl('tr');
+        cols.forEach(c=>tr.appendChild(createEl('td',{html:String(row[c] ?? '')})));
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      return table;
+    }
+
+    /** ------------ 面板渲染 -------------- */
+    const panel = $('#panel'), panelTitle = $('#panelTitle'), panelContent = $('#panelContent'), crumb = $('#crumb'), backBtn = $('#backBtn');
+    const openPanel = ()=>{ panel.classList.add('open'); panel.setAttribute('aria-hidden','false'); };
+    const closePanel = ()=>{ panel.classList.remove('open'); panel.setAttribute('aria-hidden','true'); };
+
+    function renderProvince(province){
+      openPanel();
+      crumb.textContent = province;
+      panelTitle.textContent = '高校列表';
+      backBtn.style.display='none';
+      panelContent.innerHTML = '';
+      const box = createEl('div');
+      const searchWrap = createEl('div',{class:'search'});
+      const input = createEl('input',{placeholder:'搜索高校名…'});
+      searchWrap.appendChild(input);
+      box.appendChild(searchWrap);
+
+      const list = createEl('div',{class:'uni-list'});
+      const arr = (data[province]?.universities ?? []);
+      function draw(filter=''){
+        list.innerHTML='';
+        arr.filter(u=>u.name.includes(filter)).forEach(u=>{
+          const card = createEl('div',{class:'card'});
+          card.appendChild(createEl('h3',{html:u.name}));
+          const meta = createEl('div',{class:'meta',html:`官网：<a href="${u.website}" target="_blank" rel="noopener">${u.website}</a>`});
+          card.appendChild(meta);
+          const btns = createEl('div',{class:'btns'});
+          const viewBtn = createEl('a',{class:'btn primary',href:'javascript:void(0)'},[document.createTextNode('查看详情')]);
+          viewBtn.addEventListener('click',()=>renderUniversity(province,u));
+          const xlsBtn = createEl('a',{class:'btn',href:u.excel,target:'_blank',rel:'noopener',title:'下载Excel（三表合一）'},[document.createTextNode('下载Excel')]);
+          btns.appendChild(viewBtn); btns.appendChild(xlsBtn);
+          card.appendChild(btns);
+          list.appendChild(card);
+        });
+        if(!list.children.length){
+          list.appendChild(createEl('div',{class:'meta',html:'未找到匹配高校'}));
+        }
+      }
+      input.addEventListener('input',()=>draw(input.value.trim()));
+      draw();
+      box.appendChild(list);
+      panelContent.appendChild(box);
+    }
+
+    function renderUniversity(province, u){
+      openPanel();
+      crumb.textContent = province + " / " + u.name;
+      panelTitle.textContent = '合作详情';
+      backBtn.style.display='inline-flex';
+      backBtn.onclick = ()=>renderProvince(province);
+      panelContent.innerHTML = '';
+
+      // tabs
+      const tabs = createEl('div',{class:'tabs'});
+      const t1 = createEl('button',{class:'tab active'},[document.createTextNode('合作企业')]);
+      const t2 = createEl('button',{class:'tab'},[document.createTextNode('优势学科')]);
+      const t3 = createEl('button',{class:'tab'},[document.createTextNode('学校专家')]);
+      tabs.appendChild(t1);tabs.appendChild(t2);tabs.appendChild(t3);
+
+      const sec1 = createEl('div',{},[renderTable(u.enterprises)]);
+      const sec2 = createEl('div',{style:'display:none'},[renderTable(u.disciplines)]);
+      const sec3 = createEl('div',{style:'display:none'},[renderTable(u.experts)]);
+
+      const actions = createEl('div',{class:'btns',style:'margin:10px 0'});
+      const siteBtn = createEl('a',{class:'btn',href:u.website,target:'_blank',rel:'noopener'},[document.createTextNode('高校官网')]);
+      const xlsBtn = createEl('a',{class:'btn primary',href:u.excel,target:'_blank',rel:'noopener'},[document.createTextNode('下载Excel（含三表）')]);
+      actions.appendChild(siteBtn); actions.appendChild(xlsBtn);
+
+      function activate(tabIndex){
+        [t1,t2,t3].forEach((t,i)=>t.classList.toggle('active', i===tabIndex));
+        [sec1,sec2,sec3].forEach((s,i)=>s.style.display = (i===tabIndex)?'block':'none');
+      }
+      t1.onclick=()=>activate(0); t2.onclick=()=>activate(1); t3.onclick=()=>activate(2);
+
+      panelContent.appendChild(tabs);
+      panelContent.appendChild(actions);
+      panelContent.appendChild(sec1);
+      panelContent.appendChild(sec2);
+      panelContent.appendChild(sec3);
+    }
+
+    /** ------------ 地图 -------------- */
+    const chart = echarts.init(document.getElementById('map'));
+    const chinaGeoJSONUrl = 'https://geo.datav.aliyun.com/areas_v3/bound/geojson?code=100000_full';
+
+    fetch(chinaGeoJSONUrl).then(r=>r.json()).then(geoJson=>{
+      echarts.registerMap('china', geoJson);
+      const seriesData = geoJson.features.map(f=>{
+        const name = f.properties.name;
+        const list = data[name]?.universities || [];
+        return { name, value: list.length, universities: list.map(u=>u.name) };
+      });
+      const maxv = Math.max(1, ...seriesData.map(d=>d.value||0));
+
+      const option = {
+        backgroundColor: 'transparent',
+        tooltip: {
+          trigger:'item',
+          appendToBody:true,
+          formatter: (p)=>{
+            const unis = (p.data?.universities||[]).slice(0,6);
+            const lines = unis.length ? unis.map(n=>'· '+n).join('<br/>') : '暂无收录高校';
+            return `<div style="min-width:220px">
+              <strong>${p.name}</strong><br/>
+              高校数量：${p.data?.value||0}<br/>
+              ${lines}<br/>
+              <span style="color:#9fb2d9">提示：点击省份查看详情</span>
+            </div>`;
+          }
+        },
+        visualMap:{
+          type:'continuous',min:0,max:maxv, right:16, bottom:16, text:['多','少'],
+          inRange:{ color:['#2e7bd1','#42c2ff','#a0f1ff'] },
+          textStyle:{ color:'#fff' }, calculable:true
+        },
+        geo:{
+          map:'china', roam:true, zoom:1.05,
+          label:{ show:false },
+          itemStyle:{ borderColor:'#3aa0ff', borderWidth:0.6, areaColor:'#143657' },
+          emphasis:{
+            label:{ show:true, color:'#fff', fontWeight:'bold' },
+            itemStyle:{ areaColor:'#46e1ff', borderColor:'#fff', borderWidth:1.2, shadowBlur:30, shadowColor:'rgba(0,0,0,.45)' }
+          }
+        },
+        series:[{ type:'map', map:'china', geoIndex:0, data:seriesData }]
+      };
+      chart.setOption(option);
+      chart.on('click', (p)=> renderProvince(p.name));
+      window.addEventListener('resize', ()=>chart.resize());
+    });
+  </script>
+
+<div aria-label="项目合作需求表下载" class="download-entry" style="position: fixed; left: 16px; bottom: 16px; z-index: 50;
+            background: rgba(0,0,0,0.7); padding: 12px 14px;
+            border-radius: 8px; max-width: 260px; color: #fff; font-size: 14px; line-height: 1.5;">
+<p style="margin: 0 0 8px 0;">
+    📊 在这里您可以下载《项目合作需求表》，
+    该表汇总了各地企业与高校的合作需求，
+    方便快速了解合作方向与资源对接情况。
+  </p>
+<a download="" href="excels/项目合作需求表-汇总表-20240307.xlsx" rel="noopener" style="display: inline-block; padding: 8px 12px;
+            background: #007bff; color: #fff;
+            border-radius: 4px; text-decoration: none;" target="_blank">
+    ⬇️ 下载项目合作需求表（Excel）
+  </a>
+</div>
+</body>
+</html>
